@@ -1,0 +1,106 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+. $SCRIPT_DIR/env/openapi-generator.sh
+
+usage() {
+    cat <<EOF
+usage: 
+$0 (-h | --help)
+$0 <specification> <generator> <out> [--] [<generator arg>]  
+
+Based on the OpenAPI <specification> file, generates a server/client
+using the specified <generator> in the path <out>. <generator arg>'s are passed
+to the generator.
+
+For valid <generator> values, see:
+https://openapi-generator.tech/docs/generators
+
+<generator arg>'s can be found, here:
+https://openapi-generator.tech/docs/usage#additional-properties 
+
+The container engine used to launch the generator is specified by the 
+'CONTAINER_ENGINE' environment variable (default: podman).
+
+EOF
+    return 0
+}
+
+### main ###
+
+if [ $# -eq 1 ]; then
+    if [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
+        usage
+        exit 0
+    fi
+fi
+
+if [ $# -lt 3 ]; then
+    echo "error: bad args, try '$0 --help'"
+    exit 1
+fi
+
+specification=$1
+generator=$2
+out=$3
+shift 3
+
+if ! OPTS=$(getopt -o c:t: -l config:,template-dir: -- "$@"); then
+    usage
+    exit 1
+fi
+eval set -- "$OPTS"
+
+while :; do
+    case "$1" in
+    -c | --config)
+        USE_CONFIG='true'
+        CONFIG_FILE="$2"
+        shift 2
+        ;;
+    -t | --template-dir)
+        USE_TEMPLATES='true'
+        TEMPLATES_DIR="$2"
+        shift 2
+        ;;
+    --)
+        shift
+        break
+        ;;
+    esac
+done
+
+: "${USE_TEMPLATES:='false'}"
+
+map_specification='/tmp/specification'
+map_out='/out'
+map_config='/tmp/generator_config.yaml'
+map_templates='/templates'
+
+normalize_generator $generator
+
+mount_args="$API_GENERATE"
+mount_args="${mount_args} --bind-mount ${out}:${map_out}"
+mount_args="${mount_args} --bind-mount ${specification}:${map_specification}"
+
+command_args=""
+command_args="${command_args} ${API_GENERATE_ARG_INPUT_SPEC}${map_specification}"
+command_args="${command_args} ${API_GENERATE_ARG_GENERATOR}${GENERATOR}"
+command_args="${command_args} ${API_GENERATE_ARG_OUTPUT}${map_out}"
+
+if [ $USE_CONFIG = 'true' ]; then
+    mount_args="${mount_args} --bind-mount ${CONFIG_FILE}:${map_config}"
+    command_args="${command_args} ${API_GENERATE_ARG_CONFIG_FILE}${map_config}"
+fi
+
+if [ $USE_TEMPLATES = 'true' ]; then
+    mount_args="${mount_args} --bind-mount ${TEMPLATES_DIR}:${map_templates}"
+    command_args="${command_args} ${API_GENERATE_ARG_TEMPLATE_DIR}${map_templates}"
+fi
+
+command_args="${command_args} $@"
+
+mkdir -p "$out"
+sh $SCRIPT_DIR/codegen $mount_args -- $command_args

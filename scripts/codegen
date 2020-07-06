@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+SCRIPTS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+. $SCRIPTS_DIR/env/podman.sh
+. $SCRIPTS_DIR/env/openapi-generator.sh
+
+usage() {
+    cat <<EOF
+usage: 
+$0 (-h | --help)
+$0 [(-m <bind mount> | --bind-mount <bind mount>)] [--] [<generator arg>] 
+
+Launches a code generator within a container with the specified
+<bind mount>'s. <generator arg>'s are passed to the generator.
+
+example:
+$0 -m ${PWD}:/currdir -- version
+
+EOF
+    return 0
+}
+
+### main ###
+
+if ! OPTS=$(getopt -o m: -l bind-mount: -- "$@"); then
+    usage
+    exit 1
+fi
+eval set -- "$OPTS"
+
+container_args=""
+
+while :; do
+    case "$1" in
+    -m | --bind-mount)
+        container_args="${container_args} ${CONTAINER_ARG_MOUNT}${2} "
+        shift 2
+        ;;
+    --)
+        shift
+        break
+        ;;
+    esac
+done
+
+$CONTAINER_ENGINE $CONTAINER_RUNCMD $container_args $CONTAINER_ID $@
